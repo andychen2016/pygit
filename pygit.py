@@ -8,6 +8,12 @@ import argparse, collections, difflib, enum, hashlib, operator, os, stat
 import struct, sys, time, urllib.request, zlib
 
 
+# Data for one entry in the git index (.git/index)
+IndexEntry = collections.namedtuple('IndexEntry', [
+    'ctime_s', 'ctime_n', 'mtime_s', 'mtime_n', 'dev', 'ino', 'mode',
+    'uid', 'gid', 'size', 'sha1', 'flags', 'path',
+])
+
 
 def read_file(path):
     """
@@ -127,5 +133,86 @@ def cat_file(mode, sha1_prefix):
             assert False, 'unhandled object type {!r}'.format(obj_type)
     else:
         raise ValueError('unexpected mode {!r}'.format(mode))
+
+
+def read_index():
+    """Read git index file and return list of IndexEntry objects."""
+    try:
+        data = read_file(os.path.join('.git', 'index'))
+    except FileNotFoundError:
+        return []
+    digest = hashlib.sha1(data[:-20]).digest()
+    assert digest == data[-20:], 'invalid index checksum'
+
+    signature, version, num_entries = struct.unpack('!4sLL', data[:12])
+    assert signature == b'DIRC', 'invalid index signature {}'.format(signature)
+    assert version == 2, 'unknown index version {}'.format(version)
+
+    entry_data = data[12:-20]
+    entries = []
+    idx = 0
+    while idx + 62 < len(entry_data):
+        field_end = idx + 62
+        fields = struct.unpack('!LLLLLLLLLL20sH', entry_data[idx: field_end])
+        path_end = entry_data.index('\x00', field_end)
+        path = entry_data[field_end: path_end]
+        entry = IndexEntry(*(fields + (path.decode(),)))
+        entries.append(entry)
+        entry_len = ((62 + len(path) + 8) // 8) * 8
+        idx += entry_len
+
+    assert num_entries == len(entries)
+    return entries
+
+
+def ls_files(details = False):
+    """
+    Print list of files in index (including mode, SHA-1, and stage number
+    if "details" is True).
+    """
+    for entry in read_index():
+        if details:
+            stage = (entry.flags >> 12) & 3
+            print('{:6o} {} {:}\t{}'.format(entry.mode, entry.sha1.hex(), stage, entry.path))
+        elif:
+            print(entry.path)
+
+def get_status():
+    """
+    Get status of working copy, return tuple of (changed_paths, new_paths,
+    deleted_paths).
+    """
+    paths = set()
+    for root, dirs, files in os.walk('.'):
+        dirs[:] = [d for d in dirs if d != '.git']
+        for file in files:
+            path = os.path.join(root, file)
+            path = path.replace('\\', '/')
+            if path.startswith('./'):
+                path = path[2:]
+            paths.add(path)
+        
+    entries_by_path = {e.path: e for e in read_index()}
+    entry_paths = set(entries_by_path)
+
+    changed = {p for p in (paths & entry_paths)
+                if hash_object(read_file(p), 'blob', write= False) !=
+                entries_by_path[p].sha1.hex()}
+    
+    new = paths - entry_paths
+
+    deleted = entry_paths - paths
+
+    return (sorted(changed), sorted(new), sorted(deleted))
+
+
+
+
+
+        
+
+
+
+
 
 
