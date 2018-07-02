@@ -316,104 +316,6 @@ def get_local_master_hash():
         return None
 
 
-
-
-def status():
-    """Show status of working copy."""
-    changed, new, deleted = get_status()
-    if changed:
-        print('changed files:')
-        for path in changed:
-            print('   ', path)
-    if new:
-        print('new files:')
-        for path in new:
-            print('   ', path)
-    if deleted:
-        print('deleted files:')
-        for path in deleted:
-            print('   ', path)
-
-
-def diff():
-    """Show diff of files changed (between index and working copy)."""
-    changed, _, _ = get_status()
-    entries_by_path = {e.path: e for e in read_index()}
-    for i, path in enumerate(changed):
-        sha1 = entries_by_path[path].sha1.hex()
-        obj_type, data = read_object(sha1)
-        assert obj_type == 'blob'
-        index_lines = data.decode().splitlines()
-        working_lines = read_file(path).decode().splitlines()
-        diff_lines = difflib.unified_diff(
-                index_lines, working_lines,
-                '{} (index)'.format(path),
-                '{} (working copy)'.format(path),
-                lineterm='')
-        for line in diff_lines:
-            print(line)
-        if i < len(changed) - 1:
-            print('-' * 70)
-
-
-def write_index(entries):
-    """Write list of IndexEntry objects to git index file."""
-    packed_entries = []
-    for entry in entries:
-        entry_head = struct.pack('!LLLLLLLLLL20sH',
-                entry.ctime_s, entry.ctime_n, entry.mtime_s, entry.mtime_n,
-                entry.dev, entry.ino, entry.mode, entry.uid, entry.gid,
-                entry.size, entry.sha1, entry.flags)
-        path = entry.path.encode()
-        length = ((62 + len(path) + 8) // 8) * 8
-        packed_entry = entry_head + path + b'\x00' * (length - 62 - len(path))
-        packed_entries.append(packed_entry)
-    header = struct.pack('!4sLL', b'DIRC', 2, len(entries))
-    all_data = header + b''.join(packed_entries)
-    digest = hashlib.sha1(all_data).digest()
-    write_file(os.path.join('.git', 'index'), all_data + digest)
-
-
-def add(paths):
-    """Add all file paths to git index."""
-    paths = [p.replace('\\', '/') for p in paths]
-    all_entries = read_index()
-    entries = [e for e in all_entries if e.path not in paths]
-    for path in paths:
-        sha1 = hash_object(read_file(path), 'blob')
-        st = os.stat(path)
-        flags = len(path.encode())
-        assert flags < (1 << 12)
-        entry = IndexEntry(
-                int(st.st_ctime), 0, int(st.st_mtime), 0, st.st_dev,
-                st.st_ino, st.st_mode, st.st_uid, st.st_gid, st.st_size,
-                bytes.fromhex(sha1), flags, path)
-        entries.append(entry)
-    entries.sort(key=operator.attrgetter('path'))
-    write_index(entries)
-
-
-def write_tree():
-    """Write a tree object from the current index entries."""
-    tree_entries = []
-    for entry in read_index():
-        assert '/' not in entry.path, \
-                'currently only supports a single, top-level directory'
-        mode_path = '{:o} {}'.format(entry.mode, entry.path).encode()
-        tree_entry = mode_path + b'\x00' + entry.sha1
-        tree_entries.append(tree_entry)
-    return hash_object(b''.join(tree_entries), 'tree')
-
-
-def get_local_master_hash():
-    """Get current commit hash (SHA-1 string) of local master branch."""
-    master_path = os.path.join('.git', 'refs', 'heads', 'master')
-    try:
-        return read_file(master_path).decode().strip()
-    except FileNotFoundError:
-        return None
-
-
 def commit(message, auther=None):
     """
     Commit the current state of the index to master with given message.
@@ -737,15 +639,6 @@ if __name__ == '__main__':
         assert False, 'unexpected command {!r}'.format(args.command)
 
 
-
-
-
-        
-def main():
-    get_local_master_hash()
-
-if __name__ == '__main__':
-    main()
 
 
 
